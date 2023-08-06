@@ -2,6 +2,7 @@
 import { SecretValue, Tags } from 'aws-cdk-lib';
 import { Artifact, Pipeline } from 'aws-cdk-lib/aws-codepipeline';
 import { Construct } from 'constructs';
+import { config } from 'dotenv';
 import {
   CodeBuildAction,
   GitHubSourceAction,
@@ -14,16 +15,14 @@ import {
 } from 'aws-cdk-lib/aws-codebuild';
 
 import { Effect, PolicyStatement } from 'aws-cdk-lib/aws-iam';
-import { Topic } from 'aws-cdk-lib/aws-sns';
-import { SlackChannelConfiguration } from 'aws-cdk-lib/aws-chatbot';
-import { NotificationRule } from 'aws-cdk-lib/aws-codestarnotifications';
-import { pipelineConfig } from '../../../utils/pipelineConfig';
+
+config({ path: '.env.production' });
 
 interface Props {
   environment: string;
 }
 
-export class PipelineStack extends Construct {
+export class ProductionPipeline extends Construct {
   readonly frontEndTestProject: PipelineProject;
 
   readonly backEndTestProject: PipelineProject;
@@ -34,18 +33,9 @@ export class PipelineStack extends Construct {
 
   constructor(scope: Construct, id: string, props: Props) {
     super(scope, id);
-    const {
-      buildCommand,
-      deployCommand,
-      branch,
-      tag,
-      githubToken,
-      workspaceId,
-      channelId,
-    } = pipelineConfig(props.environment);
 
     /* ---------- Pipeline Configs ---------- */
-    const secretToken = new SecretValue(githubToken);
+    const secretToken = new SecretValue(process.env.GITHUB_TOKEN);
 
     const codeBuildPolicy = new PolicyStatement({
       sid: 'AssumeRole',
@@ -129,9 +119,9 @@ export class PipelineStack extends Construct {
               'on-failure': 'ABORT',
               commands: [
                 'cd ../web',
-                `${buildCommand}`,
+                'yarn build:prod',
                 'cd ../infrastructure',
-                `${deployCommand}`,
+                'yarn cdk deploy',
               ],
             },
             post_build: {
@@ -150,7 +140,7 @@ export class PipelineStack extends Construct {
       scope,
       `Chapter5-FrontEndTest-PipelineProject-${props.environment}`,
       {
-        projectName: `Chapter5-FrontEndTest-PipelineProject-${props.environment}`,
+        projectName: `Chapter5-BackendTest-PipelineProject-${props.environment}`,
         environment: {
           buildImage: LinuxBuildImage.fromCodeBuildImageId(
             'aws/codebuild/amazonlinux2-x86_64-standard:4.0',
@@ -182,7 +172,7 @@ export class PipelineStack extends Construct {
       scope,
       `BackendTest-Pipeline-${props.environment}`,
       {
-        pipelineName: `Chapter5-Pipeline-${props.environment}`,
+        pipelineName: `Chapter5-BackendTest-${props.environment}`,
       },
     );
 
@@ -194,7 +184,7 @@ export class PipelineStack extends Construct {
           actionName: 'Source',
           owner: 'westpoint-io',
           repo: 'AWS-CDK-in-Action-Chapter-5',
-          branch: `${branch}`,
+          branch: 'main',
           oauthToken: secretToken,
           output: outputSource,
           trigger: GitHubTrigger.WEBHOOK,
@@ -238,33 +228,7 @@ export class PipelineStack extends Construct {
       ],
     });
 
-    const snsTopic = new Topic(
-      this,
-      `${props.environment}-Pipeline-SlackNotificationsTopic`,
-    );
-
-    const slackConfig = new SlackChannelConfiguration(this, 'SlackChannel', {
-      slackChannelConfigurationName: `${props.environment}-Pipeline-Slack-Channel-Config`,
-      slackWorkspaceId: workspaceId || '',
-      slackChannelId: channelId || '',
-    });
-
-    const rule = new NotificationRule(this, 'NotificationRule', {
-      source: this.pipeline,
-      events: [
-        'codepipeline-pipeline-pipeline-execution-failed',
-        'codepipeline-pipeline-pipeline-execution-canceled',
-        'codepipeline-pipeline-pipeline-execution-started',
-        'codepipeline-pipeline-pipeline-execution-resumed',
-        'codepipeline-pipeline-pipeline-execution-succeeded',
-        'codepipeline-pipeline-manual-approval-needed',
-      ],
-      targets: [snsTopic],
-    });
-
-    rule.addTarget(slackConfig);
-
     /* ---------- Tags ---------- */
-    Tags.of(this).add('Context', `${tag}`);
+    Tags.of(this).add('Context', 'chapter5-production-pipeline');
   }
 }
